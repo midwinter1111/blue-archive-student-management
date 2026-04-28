@@ -2,52 +2,46 @@ import { useState, useEffect, useCallback } from "react";
 import type { Student, FilterState } from "../types";
 import { fetchStudents, resetStudentStatus } from "../api";
 
-const LIMIT_BREAK_LABELS: Record<number, string> = {
-  1: "星1", 2: "星2", 3: "星3", 4: "星4",
-  5: "固有1", 6: "固有2", 7: "固有3", 8: "固有4", 9: "固有5",
-};
-
-function skillDisplay(v: number | null): string {
-  if (v === null) return "-";
-  return v === 10 ? "M" : String(v);
+function Stars({ value }: { value: number | null }) {
+  if (!value) return <span style={{ color: "var(--text-faint)" }}>—</span>;
+  if (value <= 4) {
+    return (
+      <span className="stars-wrap">
+        {Array.from({ length: value }, (_, i) => (
+          <span key={i} className="star on">★</span>
+        ))}
+      </span>
+    );
+  }
+  const n = value - 4;
+  return (
+    <span className="stars-wrap">
+      {Array.from({ length: n }, (_, i) => (
+        <span key={i} className="star blue">★</span>
+      ))}
+    </span>
+  );
 }
 
-function equipDisplay(v: number | null): string {
-  if (v === null) return "-";
-  return v === 0 ? "なし" : `T${v}`;
+function EquipBadge({ value }: { value: number | null }) {
+  if (value === null || value === 0) return <span className="eq low">—</span>;
+  const cls = value >= 10 ? "t10" : value >= 7 ? "normal" : "low";
+  return <span className={`eq ${cls}`}>T{value}</span>;
 }
 
-function wbDisplay(hp: number | null, atk: number | null, heal: number | null): string {
-  if (hp === null && atk === null && heal === null) return "-";
-  const f = (v: number | null) => (v == null || v === 0 ? "-" : String(v));
-  return `${f(hp)}/${f(atk)}/${f(heal)}`;
-}
-
-function isAllSkillMax(s: Student): boolean {
-  return s.skill_ex === 10 && s.skill_normal === 10 && s.skill_passive === 10 && s.skill_sub === 10;
-}
-
-function isAllEquipT10(s: Student): boolean {
-  return s.equip1 === 10 && s.equip2 === 10 && s.equip3 === 10;
+function WbVal({ value }: { value: number | null }) {
+  if (value === null || value === 0) return <span className="wb-val">—</span>;
+  return <span className={`wb-val${value === 25 ? " max" : ""}`}>{value}</span>;
 }
 
 type SortKey = "name" | "bond_level" | "limit_break" | "equip";
 type SortDir = "asc" | "desc";
 
-const DEFAULT_FILTERS: FilterState = {
-  name: "",
-  joinedOnly: false,
-  notJoinedOnly: false,
-  skillNotMax: false,
-  equipNotT10: false,
-  limitBreakMin: "",
-  limitBreakMax: "",
-};
+const DEFAULT_FILTERS: FilterState = { name: "", join: "all" };
 
 export default function ListView() {
   const [students, setStudents] = useState<Student[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [loading, setLoading] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -68,22 +62,16 @@ export default function ListView() {
   }, []);
 
   useEffect(() => {
-    load(appliedFilters);
-  }, [appliedFilters, load]);
+    const timer = setTimeout(() => load(filters), 250);
+    return () => clearTimeout(timer);
+  }, [filters, load]);
 
-  const applyFilters = () => setAppliedFilters({ ...filters });
-  const resetFilters = () => {
-    setFilters(DEFAULT_FILTERS);
-    setAppliedFilters(DEFAULT_FILTERS);
-  };
+  const setJoin = (join: FilterState["join"]) =>
+    setFilters((f) => ({ ...f, join }));
 
   const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
   };
 
   const sorted = [...students].sort((a, b) => {
@@ -101,10 +89,8 @@ export default function ListView() {
     try {
       await resetStudentStatus(s.id);
       setResetTarget(null);
-      load(appliedFilters);
-    } catch {
-      // ignore
-    }
+      load(filters);
+    } catch { /* ignore */ }
   };
 
   const sortIcon = (key: SortKey) => {
@@ -113,193 +99,94 @@ export default function ListView() {
   };
 
   const joinedCount = students.filter((s) => s.is_joined).length;
-  const totalCount = students.length;
 
   return (
     <div className="list-mode">
-      {/* 固定ヘッダ（スクロール時も表示） */}
       <div className="list-sticky-header">
         <div className="section-header">
-          <h2>📋 一覧モード</h2>
-          <span className="count-badge">{joinedCount} / {totalCount} 人加入済み</span>
+          <h2>一覧</h2>
+          <span className="count-badge">{joinedCount} / {students.length} 人加入済み</span>
+          {loading && <span style={{ fontSize: 11, color: "var(--text-faint)" }}>読み込み中…</span>}
         </div>
 
-        {/* フィルターパネル */}
-        <div className="filter-panel">
-        <div className="filter-row">
-          <div className="filter-group">
-            <label>名前検索</label>
-            <input
-              type="text"
-              value={filters.name}
-              onChange={(e) => setFilters((f) => ({ ...f, name: e.target.value }))}
-              placeholder="例: ノゾミ"
-              className="input-text-sm"
-            />
-          </div>
-
-          <div className="filter-group">
-            <label>加入状態</label>
-            <select
-              value={filters.joinedOnly ? "joined" : filters.notJoinedOnly ? "not_joined" : "all"}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFilters((f) => ({
-                  ...f,
-                  joinedOnly: v === "joined",
-                  notJoinedOnly: v === "not_joined",
-                }));
-              }}
-              className="input-select-sm"
-            >
-              <option value="all">全て</option>
-              <option value="joined">加入済みのみ</option>
-              <option value="not_joined">未加入のみ</option>
-            </select>
-          </div>
-
-          <div className="filter-group">
-            <label>スキル</label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={filters.skillNotMax}
-                onChange={(e) => setFilters((f) => ({ ...f, skillNotMax: e.target.checked }))}
-              />
-              MAX未達のみ
-            </label>
-          </div>
-
-          <div className="filter-group">
-            <label>装備</label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={filters.equipNotT10}
-                onChange={(e) => setFilters((f) => ({ ...f, equipNotT10: e.target.checked }))}
-              />
-              T10未達のみ
-            </label>
-          </div>
-
-          <div className="filter-group">
-            <label>凸/固有（1–9）</label>
-            <div className="range-inputs">
-              <input
-                type="number"
-                min={1}
-                max={9}
-                value={filters.limitBreakMin}
-                onChange={(e) => setFilters((f) => ({ ...f, limitBreakMin: e.target.value }))}
-                placeholder="下限"
-                className="input-number-sm"
-              />
-              <span>〜</span>
-              <input
-                type="number"
-                min={1}
-                max={9}
-                value={filters.limitBreakMax}
-                onChange={(e) => setFilters((f) => ({ ...f, limitBreakMax: e.target.value }))}
-                placeholder="上限"
-                className="input-number-sm"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="filter-actions">
-          <button className="btn-primary btn-sm" onClick={applyFilters}>
-            🔍 絞り込み
-          </button>
-          <button className="btn-secondary btn-sm" onClick={resetFilters}>
-            ✕ リセット
-          </button>
-          <button className="btn-secondary btn-sm" onClick={() => load(appliedFilters)}>
-            🔄 更新
-          </button>
+        <div className="filter-panel" style={{ marginTop: 10 }}>
+          <span className="filter-label">名前</span>
+          <input
+            type="text"
+            className="filter-input"
+            value={filters.name}
+            onChange={(e) => setFilters((f) => ({ ...f, name: e.target.value }))}
+            placeholder="例: ノゾミ"
+          />
+          <div className="filter-sep" />
+          <span className="filter-label">加入</span>
+          <button className={`chip ${filters.join === "all" ? "active" : ""}`} onClick={() => setJoin("all")}>すべて</button>
+          <button className={`chip ${filters.join === "joined" ? "active" : ""}`} onClick={() => setJoin("joined")}>加入済み</button>
+          <button className={`chip ${filters.join === "not_joined" ? "active" : ""}`} onClick={() => setJoin("not_joined")}>未加入</button>
         </div>
       </div>
-      </div>{/* /list-sticky-header */}
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {loading && <div className="loading">読み込み中…</div>}
+      {error && <div className="alert alert-error" style={{ marginTop: 8 }}>{error}</div>}
 
-      {/* テーブル */}
-      {!loading && (
-        <div className="table-container">
-          <table className="student-table">
-            <thead>
-              <tr>
-                <th className="sortable" onClick={() => handleSort("name")}>
-                  生徒名{sortIcon("name")}
-                </th>
-                <th>状態</th>
-                <th className="sortable col-center" onClick={() => handleSort("bond_level")}>
-                  絆{sortIcon("bond_level")}
-                </th>
-                <th className="col-center">WB (H/A/R)</th>
-                <th>スキル</th>
-                <th className="sortable col-center" onClick={() => handleSort("limit_break")}>
-                  凸/固有{sortIcon("limit_break")}
-                </th>
-                <th className="sortable col-center" onClick={() => handleSort("equip")}>
-                  装備{sortIcon("equip")}
-                </th>
-                <th>操作</th>
+      <div className="table-container">
+        <table className="student-table">
+          <thead>
+            <tr>
+              <th className={`sortable ${sortKey === "name" ? "sort-active" : ""}`} onClick={() => handleSort("name")}>
+                生徒名{sortIcon("name")}
+              </th>
+              <th>加入状況</th>
+              <th className={`col-center sortable ${sortKey === "limit_break" ? "sort-active" : ""}`} onClick={() => handleSort("limit_break")}>
+                凸/固有{sortIcon("limit_break")}
+              </th>
+              <th className={`col-center sortable ${sortKey === "bond_level" ? "sort-active" : ""}`} onClick={() => handleSort("bond_level")}>
+                絆{sortIcon("bond_level")}
+              </th>
+              <th className={`col-sep col-center sortable ${sortKey === "equip" ? "sort-active" : ""}`} onClick={() => handleSort("equip")}>
+                装備1{sortIcon("equip")}
+              </th>
+              <th className="col-center">装備2</th>
+              <th className="col-center">装備3</th>
+              <th className="col-sep col-center">WB-H</th>
+              <th className="col-center">WB-A</th>
+              <th className="col-center">WB-R</th>
+              <th className="col-sep col-center">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((s) => (
+              <tr key={s.id}>
+                <td className="name-cell">{s.name}</td>
+                <td>
+                  <span className={`join-dot ${s.is_joined ? "yes" : "no"}`} />
+                  <span className="join-label">{s.is_joined ? "加入済み" : "未加入"}</span>
+                </td>
+                <td className="num-cell">
+                  <Stars value={s.limit_break} />
+                </td>
+                <td className="num-cell">{s.bond_level ?? "—"}</td>
+                <td className="num-cell td-sep">{s.is_joined ? <EquipBadge value={s.equip1} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <EquipBadge value={s.equip2} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <EquipBadge value={s.equip3} /> : "—"}</td>
+                <td className="num-cell td-sep">{s.is_joined ? <WbVal value={s.wb_hp} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <WbVal value={s.wb_atk} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <WbVal value={s.wb_heal} /> : "—"}</td>
+                <td className="action-cell td-sep">
+                  {s.is_joined && (
+                    <button className="btn-xs" onClick={() => setResetTarget(s)}>リセット</button>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {sorted.map((s) => (
-                <tr key={s.id} className={s.is_joined ? "" : "row-not-joined"}>
-                  <td className="name-cell">{s.name}</td>
-                  <td>
-                    {s.is_joined ? (
-                      <span className="badge-joined">加入済</span>
-                    ) : (
-                      <span className="badge-not-joined">未加入</span>
-                    )}
-                  </td>
-                  <td className="num-cell">{s.bond_level ?? "-"}</td>
-                  <td className="num-cell">{wbDisplay(s.wb_hp, s.wb_atk, s.wb_heal)}</td>
-                  <td className={`skill-cell ${s.is_joined && !isAllSkillMax(s) ? "warn" : ""}`}>
-                    {s.is_joined
-                      ? `${skillDisplay(s.skill_ex)}/${skillDisplay(s.skill_normal)}/${skillDisplay(s.skill_passive)}/${skillDisplay(s.skill_sub)}`
-                      : "-"}
-                  </td>
-                  <td className="num-cell">
-                    {s.limit_break ? (LIMIT_BREAK_LABELS[s.limit_break] ?? "-") : "-"}
-                  </td>
-                  <td className={`equip-cell ${s.is_joined && !isAllEquipT10(s) ? "warn" : ""}`}>
-                    {s.is_joined
-                      ? `${equipDisplay(s.equip1)}/${equipDisplay(s.equip2)}/${equipDisplay(s.equip3)}`
-                      : "-"}
-                  </td>
-                  <td className="action-cell">
-                    {s.is_joined && (
-                      <button
-                        className="btn-danger btn-xs"
-                        onClick={() => setResetTarget(s)}
-                      >
-                        リセット
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {sorted.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="no-data">
-                    該当する生徒がいません
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+            {sorted.length === 0 && !loading && (
+              <tr>
+                <td colSpan={11} className="no-data">該当する生徒がいません</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      {/* リセット確認モーダル */}
       {resetTarget && (
         <div className="modal-overlay" onClick={() => setResetTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -309,12 +196,8 @@ export default function ListView() {
               未加入状態に戻します。よろしいですか？
             </p>
             <div className="modal-actions">
-              <button className="btn-danger" onClick={() => handleReset(resetTarget)}>
-                リセットする
-              </button>
-              <button className="btn-secondary" onClick={() => setResetTarget(null)}>
-                キャンセル
-              </button>
+              <button className="btn-danger" onClick={() => handleReset(resetTarget)}>リセットする</button>
+              <button className="btn-secondary" onClick={() => setResetTarget(null)}>キャンセル</button>
             </div>
           </div>
         </div>

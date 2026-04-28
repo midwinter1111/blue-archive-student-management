@@ -15,7 +15,6 @@ export interface Student {
   equip2: number | null;
   equip3: number | null;
   updated_at: string | null;
-  // 表示用
   limit_break_display: string | null;
   skill_ex_display: string | null;
   skill_normal_display: string | null;
@@ -57,10 +56,5 @@ export interface StudentUpdate {
 
 export interface FilterState {
   name: string;
-  joinedOnly: boolean;
-  notJoinedOnly: boolean;
-  skillNotMax: boolean;
-  equipNotT10: boolean;
-  limitBreakMin: string;
-  limitBreakMax: string;
+  join: "all" | "joined" | "not_joined";
 }

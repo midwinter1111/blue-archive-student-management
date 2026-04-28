@@ -409,13 +409,16 @@ def extract_student_data(image: np.ndarray) -> dict[str, Any]:
         result[key] = ocr_skill_level(roi)
 
     # 固有武器/星ランク
-    # 右側の青い星（固有武器）を優先して確認し、なければ左側の黄色い星（星ランク）を使う
-    unique_count = count_unique_stars(crop_roi(image, "unique_stars"))
-    if unique_count > 0:
-        result["limit_break"] = 4 + unique_count  # 固有1-4 → limit_break 5-8
+    # 黄色い星を先に数える。星4未満は固有武器を持てないため固有星のチェックは不要。
+    # 星4の場合のみ青い固有星を追加確認する。
+    star_count = count_filled_stars(crop_roi(image, "portrait_stars"))
+    if 1 <= star_count <= 3:
+        result["limit_break"] = star_count
+    elif star_count == 4:
+        unique_count = count_unique_stars(crop_roi(image, "unique_stars"))
+        result["limit_break"] = (4 + unique_count) if unique_count > 0 else 4
     else:
-        star_count = count_filled_stars(crop_roi(image, "portrait_stars"))
-        result["limit_break"] = star_count if star_count > 0 else None
+        result["limit_break"] = None
 
     # 装備Tier (結合OCR + O→0変換)
     for i, key in enumerate(("equip1_tier", "equip2_tier", "equip3_tier"), 1):

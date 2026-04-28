@@ -14,12 +14,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export async function fetchStudents(filters: FilterState): Promise<Student[]> {
   const params = new URLSearchParams();
   if (filters.name) params.set("name", filters.name);
-  if (filters.joinedOnly) params.set("joined_only", "true");
-  if (filters.notJoinedOnly) params.set("not_joined_only", "true");
-  if (filters.skillNotMax) params.set("skill_not_max", "true");
-  if (filters.equipNotT10) params.set("equip_not_t10", "true");
-  if (filters.limitBreakMin) params.set("limit_break_min", filters.limitBreakMin);
-  if (filters.limitBreakMax) params.set("limit_break_max", filters.limitBreakMax);
+  if (filters.join === "joined") params.set("joined_only", "true");
+  if (filters.join === "not_joined") params.set("not_joined_only", "true");
   return request<Student[]>(`/students?${params}`);
 }
 
