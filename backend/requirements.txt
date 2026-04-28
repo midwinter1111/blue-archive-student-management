@@ -1,0 +1,11 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.0
+sqlalchemy==2.0.30
+easyocr==1.7.1
+opencv-python==4.9.0.80
+mss==9.0.1
+pywin32==306
+keyboard==0.13.5
+Pillow==10.3.0
+numpy==1.26.4
+python-multipart==0.0.9
