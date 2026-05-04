@@ -428,6 +428,7 @@ body {
 .student-table th.sort-active { color: var(--primary); }
 .student-table th.col-center { text-align: center; }
 .student-table th.col-sep    { padding-left: 20px; border-left: 2px solid var(--border); }
+.student-table th.th-wrap   { white-space: normal !important; text-align: center !important; line-height: 1.4; }
 
 .student-table td {
   padding: 9px 12px; border-bottom: 1px solid var(--border);

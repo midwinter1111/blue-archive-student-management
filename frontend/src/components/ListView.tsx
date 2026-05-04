@@ -87,6 +87,13 @@ function WbVal({ value }: { value: number | null }) {
   return <span className={`eq ${value >= 25 ? "t10" : "normal"}`}>{value}</span>;
 }
 
+function SkillBadge({ value }: { value: number | null }) {
+  if (value === null) return <span style={{ color: "var(--text-faint)" }}>—</span>;
+  const label = value === 10 ? "M" : String(value);
+  const cls = value === 10 ? "max" : value >= 6 ? "high" : "normal";
+  return <span className={`sk ${cls}`}>{label}</span>;
+}
+
 // ─── マイセットポップアップ ──────────────────────────────────────────
 interface MySetPopupProps {
   mySets: MySet[];
@@ -568,7 +575,7 @@ export default function ListView() {
         <table className="student-table">
           <thead>
             <tr>
-              <th colSpan={10} className="th-group th-group-status">生徒育成状況</th>
+              <th colSpan={14} className="th-group th-group-status">生徒育成状況</th>
               <th colSpan={6} className="th-group th-group-info">生徒情報</th>
               <th className="th-group th-group-op" />
             </tr>
@@ -577,12 +584,16 @@ export default function ListView() {
               <th>加入状況</th>
               <th className={`col-center sortable ${sortKey === "limit_break" ? "sort-active" : ""}`} onClick={() => handleSort("limit_break")}>凸/固有{sortIcon("limit_break")}</th>
               <th className={`col-center sortable ${sortKey === "bond_level" ? "sort-active" : ""}`} onClick={() => handleSort("bond_level")}>絆{sortIcon("bond_level")}</th>
+              <th className="col-center">EX</th>
+              <th className="col-center">NS</th>
+              <th className="col-center">PS</th>
+              <th className="col-center">SS</th>
               <th className={`col-center sortable ${sortKey === "equip" ? "sort-active" : ""}`} onClick={() => handleSort("equip")}>装備1{sortIcon("equip")}</th>
               <th className="col-center">装備2</th>
               <th className="col-center">装備3</th>
-              <th className="col-center">WB-HP</th>
-              <th className="col-center">WB-攻撃力</th>
-              <th className="col-center">WB-治癒力</th>
+              <th className="col-center th-wrap">WB<br/>HP</th>
+              <th className="col-center th-wrap">WB<br/>攻撃力</th>
+              <th className="col-center th-wrap">WB<br/>治癒力</th>
               <th className="col-sep col-center">学校</th>
               <th className="col-center">役割</th>
               <th className="col-center">攻撃タイプ</th>
@@ -603,6 +614,10 @@ export default function ListView() {
                 </td>
                 <td className="num-cell"><Stars value={s.limit_break} /></td>
                 <td className="num-cell">{s.bond_level ?? "—"}</td>
+                <td className="num-cell">{s.is_joined ? <SkillBadge value={s.skill_ex} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <SkillBadge value={s.skill_normal} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <SkillBadge value={s.skill_passive} /> : "—"}</td>
+                <td className="num-cell">{s.is_joined ? <SkillBadge value={s.skill_sub} /> : "—"}</td>
                 <td className="num-cell">{s.is_joined ? <EquipBadge value={s.equip1} /> : "—"}</td>
                 <td className="num-cell">{s.is_joined ? <EquipBadge value={s.equip2} /> : "—"}</td>
                 <td className="num-cell">{s.is_joined ? <EquipBadge value={s.equip3} /> : "—"}</td>
@@ -621,7 +636,7 @@ export default function ListView() {
               </tr>
             ))}
             {sorted.length === 0 && !loading && (
-              <tr><td colSpan={17} className="no-data">該当する生徒がいません</td></tr>
+              <tr><td colSpan={21} className="no-data">該当する生徒がいません</td></tr>
             )}
           </tbody>
         </table>
