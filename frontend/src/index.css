@@ -494,6 +494,34 @@ body {
 
 .no-data { text-align: center; color: var(--text-muted); padding: 40px; }
 
+/* ── 名前セル（クリック可能） ── */
+.name-cell-link { cursor: pointer; }
+.student-table tbody tr:hover .name-cell-link { color: var(--primary); text-decoration: underline; }
+
+/* ── 生徒アクションポップアップ ── */
+.student-popup {
+  background: var(--panel);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 40px rgba(0,40,80,.18);
+  width: min(320px, 90vw);
+  overflow: hidden;
+}
+.student-popup-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.student-popup-info {
+  flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0;
+}
+.student-popup-name {
+  font-size: 15px; font-weight: 700; color: var(--text);
+}
+.student-popup-actions {
+  display: flex; gap: 10px; padding: 16px 20px;
+  justify-content: flex-end;
+}
+
 /* ── 固定情報バッジ ── */
 .ib {
   display: inline-block; border-radius: 5px; padding: 1px 6px;

@@ -66,6 +66,24 @@ const EMPTY_FORM: EditForm = {
   equip3: "",
 };
 
+function studentToForm(s: Student): EditForm {
+  return {
+    name: s.name,
+    bond_level: s.bond_level != null ? String(s.bond_level) : "",
+    wb_hp: s.wb_hp != null ? String(s.wb_hp) : "0",
+    wb_atk: s.wb_atk != null ? String(s.wb_atk) : "0",
+    wb_heal: s.wb_heal != null ? String(s.wb_heal) : "0",
+    skill_ex: s.skill_ex != null ? String(s.skill_ex) : "",
+    skill_normal: s.skill_normal != null ? String(s.skill_normal) : "",
+    skill_passive: s.skill_passive != null ? String(s.skill_passive) : "",
+    skill_sub: s.skill_sub != null ? String(s.skill_sub) : "",
+    limit_break: s.limit_break != null ? String(s.limit_break) : "",
+    equip1: s.equip1 != null ? String(s.equip1) : "",
+    equip2: s.equip2 != null ? String(s.equip2) : "",
+    equip3: s.equip3 != null ? String(s.equip3) : "",
+  };
+}
+
 function captureToForm(c: CaptureResult): EditForm {
   return {
     name: c.name ?? "",
@@ -109,7 +127,12 @@ function randomWallpaperSrc(): string {
   return `/fankit-wallpapers/${String(n).padStart(3, "0")}.png`;
 }
 
-export default function RegisterMode() {
+interface RegisterModeProps {
+  initialStudent?: Student | null;
+  onConsumed?: () => void;
+}
+
+export default function RegisterMode({ initialStudent, onConsumed }: RegisterModeProps = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +143,17 @@ export default function RegisterMode() {
   const [polling, setPolling] = useState(false);
   const [ocring, setOcring] = useState(false);
   const [wallpaperSrc, setWallpaperSrc] = useState<string>("");
+
+  useEffect(() => {
+    if (!initialStudent) return;
+    setForm(studentToForm(initialStudent));
+    setMatchedStudent(initialStudent);
+    setCapture(null);
+    setError(null);
+    setSuccess(null);
+    containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    onConsumed?.();
+  }, [initialStudent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!polling) return;

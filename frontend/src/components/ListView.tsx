@@ -354,7 +354,11 @@ function MySetPopup({
 type SortKey = "name" | "bond_level" | "limit_break" | "equip";
 type SortDir = "asc" | "desc";
 
-export default function ListView() {
+interface ListViewProps {
+  onEditStudent: (s: Student) => void;
+}
+
+export default function ListView({ onEditStudent }: ListViewProps) {
   const [students, setStudents] = useState<Student[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [loading, setLoading] = useState(false);
@@ -362,6 +366,7 @@ export default function ListView() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [error, setError] = useState<string | null>(null);
   const [resetTarget, setResetTarget] = useState<Student | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   // 生徒情報フィルタポップアップ
   const [filterPopupOpen, setFilterPopupOpen] = useState(false);
@@ -577,7 +582,6 @@ export default function ListView() {
             <tr>
               <th colSpan={14} className="th-group th-group-status">生徒育成状況</th>
               <th colSpan={6} className="th-group th-group-info">生徒情報</th>
-              <th className="th-group th-group-op" />
             </tr>
             <tr>
               <th className={`sortable ${sortKey === "name" ? "sort-active" : ""}`} onClick={() => handleSort("name")}>生徒名{sortIcon("name")}</th>
@@ -600,13 +604,14 @@ export default function ListView() {
               <th className="col-center">防御タイプ</th>
               <th className="col-center">クラス</th>
               <th className="col-center">ポジション</th>
-              <th className="col-sep col-center">操作</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((s) => (
               <tr key={s.id}>
-                <td className="name-cell"><StudentIcon name={s.name} />{s.name}</td>
+                <td className="name-cell name-cell-link" onClick={() => setSelectedStudent(s)}>
+                  <StudentIcon name={s.name} />{s.name}
+                </td>
                 <td>
                   <span className={`join-badge ${s.is_joined ? "yes" : "no"}`}>
                     {s.is_joined ? "加入済み" : "未加入"}
@@ -630,13 +635,10 @@ export default function ListView() {
                 <td className="num-cell"><InfoBadge value={s.def_type} cls={DEF_CLASS[s.def_type ?? ""] ?? "ib-kei"} /></td>
                 <td className="num-cell"><InfoBadge value={s.student_class} cls={CLS_CLASS[s.student_class ?? ""] ?? "ib-atker"} /></td>
                 <td className="num-cell"><InfoBadge value={s.position} cls={POS_CLASS[s.position ?? ""] ?? "ib-middle"} /></td>
-                <td className="action-cell td-sep">
-                  {s.is_joined && <button className="btn-xs" onClick={() => setResetTarget(s)}>リセット</button>}
-                </td>
               </tr>
             ))}
             {sorted.length === 0 && !loading && (
-              <tr><td colSpan={21} className="no-data">該当する生徒がいません</td></tr>
+              <tr><td colSpan={20} className="no-data">該当する生徒がいません</td></tr>
             )}
           </tbody>
         </table>
@@ -709,6 +711,40 @@ export default function ListView() {
             <div className="modal-actions">
               <button className="btn-danger" onClick={() => { resetAllFilters(); setFilterResetConfirmOpen(false); }}>リセットする</button>
               <button className="btn-secondary" onClick={() => setFilterResetConfirmOpen(false)}>キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 生徒アクションポップアップ */}
+      {selectedStudent && (
+        <div className="modal-overlay" onClick={() => setSelectedStudent(null)}>
+          <div className="student-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="student-popup-header">
+              <StudentIcon name={selectedStudent.name} />
+              <div className="student-popup-info">
+                <span className="student-popup-name">{selectedStudent.name}</span>
+                <span className={`join-badge ${selectedStudent.is_joined ? "yes" : "no"}`}>
+                  {selectedStudent.is_joined ? "加入済み" : "未加入"}
+                </span>
+              </div>
+              <button className="filter-popup-close" onClick={() => setSelectedStudent(null)}>✕</button>
+            </div>
+            <div className="student-popup-actions">
+              <button
+                className="btn-primary"
+                onClick={() => { setSelectedStudent(null); onEditStudent(selectedStudent); }}
+              >
+                登録情報編集
+              </button>
+              {selectedStudent.is_joined && (
+                <button
+                  className="btn-danger"
+                  onClick={() => { setResetTarget(selectedStudent); setSelectedStudent(null); }}
+                >
+                  リセット
+                </button>
+              )}
             </div>
           </div>
         </div>

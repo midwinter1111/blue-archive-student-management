@@ -3,6 +3,7 @@ import RegisterMode from "./components/RegisterMode";
 import ListView from "./components/ListView";
 import DebugView from "./components/DebugView";
 import { checkStatus } from "./api";
+import type { Student } from "./types";
 
 type Tab = "register" | "list" | "debug";
 
@@ -29,6 +30,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("list");
   const [gameFound, setGameFound] = useState<boolean | null>(null);
   const [windowSize, setWindowSize] = useState<{ width: number; height: number } | null>(null);
+  const [editTarget, setEditTarget] = useState<Student | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -81,8 +83,17 @@ export default function App() {
       </nav>
 
       <main className="main-content">
-        {tab === "register" && <RegisterMode />}
-        {tab === "list" && <ListView />}
+        {tab === "register" && (
+          <RegisterMode
+            initialStudent={editTarget}
+            onConsumed={() => setEditTarget(null)}
+          />
+        )}
+        {tab === "list" && (
+          <ListView
+            onEditStudent={(s) => { setEditTarget(s); setTab("register"); }}
+          />
+        )}
         {tab === "debug" && <DebugView />}
       </main>
     </div>
