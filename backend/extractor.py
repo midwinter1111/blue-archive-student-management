@@ -76,7 +76,8 @@ _DEBUG_COLORS: dict[str, tuple[int, int, int]] = {
 }
 
 # 金色（塗り星・スキルMAXバッジ）のHSV範囲
-GOLD_STAR_LOWER = np.array([15, 120, 150])
+# H:10-45(20-90°)=橙〜黄、S:100以上=彩度あり、V:120以上=明るさあり
+GOLD_STAR_LOWER = np.array([10, 100, 120])
 GOLD_STAR_UPPER = np.array([45, 255, 255])
 
 # 固有武器の青い星 (ブルーアーカイブUIアクセントカラー: 水色〜青系)
@@ -159,17 +160,35 @@ def count_unique_stars(roi: np.ndarray) -> int:
 
 
 def count_filled_stars(roi: np.ndarray) -> int:
-    """金色の塗り星の数をカウントする (BGR入力)"""
+    """金色の塗り星の数をカウントする (BGR入力)
+
+    連結成分カウントではなく列方向の輝度投影によるピーク検出を使う。
+    星同士が接触・近接していても列密度の谷で分離できるため、
+    MORPH_OPEN によるブロブ合体の影響を受けない。
+    """
     if roi.size == 0:
         return 0
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, GOLD_STAR_LOWER, GOLD_STAR_UPPER)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    min_area = 12
-    count = sum(1 for i in range(1, num_labels) if stats[i, cv2.CC_STAT_AREA] >= min_area)
-    return count
+    if not mask.any():
+        return 0
+    # 列ごとの金色ピクセル数を集計（星は横並びなのでピークが星の数に対応する）
+    col_sums = mask.sum(axis=0).astype(np.float32)
+    # ボックスフィルタで平滑化（ROI幅の約1/15をカーネルサイズに）
+    k = max(3, roi.shape[1] // 15)
+    smoothed = np.convolve(col_sums, np.ones(k) / k, mode='same')
+    # 最大ピーク高さの20%を閾値として、連続した山の数を数える（山1つ＝星1個）
+    thr = smoothed.max() * 0.20
+    count = 0
+    in_peak = False
+    for v in smoothed:
+        if v > thr:
+            if not in_peak:
+                count += 1
+                in_peak = True
+        else:
+            in_peak = False
+    return min(count, 4)
 
 
 def detect_wb_level(roi: np.ndarray) -> int:
@@ -249,13 +268,16 @@ def ocr_skill_level(roi: np.ndarray) -> int | None:
 
 
 def ocr_equip_tier(roi: np.ndarray) -> int | None:
-    """装備TierをOCRで読み取る。3段階の前処理を試みる (BGR入力)。"""
+    """装備TierをOCRで読み取る。4段階の前処理を試みる (BGR入力)。"""
     if roi.size == 0:
         return None
 
     def _parse(text: str) -> int | None:
         # スペース除去・文字正規化してから "TX" パターンを検索
-        t = text.upper().replace(" ", "").replace("I", "1").replace("O", "0")
+        t = text.upper().replace(" ", "")
+        # OCRの典型的な誤認識補正（特に 5↔S, 7の上横棒脱落で1になる場合）
+        for src, dst in [("I", "1"), ("L", "1"), ("O", "0"), ("S", "5"), ("B", "8"), ("Z", "2")]:
+            t = t.replace(src, dst)
         m = re.search(r"T(\d+)", t)
         if m:
             val = int(m.group(1))
@@ -269,25 +291,34 @@ def ocr_equip_tier(roi: np.ndarray) -> int | None:
     reader = get_reader()
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-    # 試行1: 輝度200以上を二値化（青背景の白テキストを抽出）
-    _, white = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-    enlarged = cv2.resize(white, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(cv2.cvtColor(enlarged, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False))
-    val = _parse(text)
-    if val is not None:
-        return val
-
-    # 試行2: 生カラー画像 4x拡大
+    # 試行1: 生カラー 4x拡大（数字の形を最も保ちやすい）
     enlarged_color = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(_to_rgb(enlarged_color), detail=0, paragraph=False))
+    text = " ".join(reader.readtext(_to_rgb(enlarged_color), detail=0, paragraph=False, allowlist="T0123456789"))
     val = _parse(text)
     if val is not None:
         return val
 
-    # 試行3: CLAHE でコントラスト強調
+    # 試行2: OTSU二値化 + ストローク拡張（細いストロークを補完）
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    binary = cv2.dilate(binary, np.ones((2, 2), np.uint8), iterations=1)
+    enlarged = cv2.resize(binary, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    text = " ".join(reader.readtext(cv2.cvtColor(enlarged, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False, allowlist="T0123456789"))
+    val = _parse(text)
+    if val is not None:
+        return val
+
+    # 試行3: 固定閾値150で二値化（青背景の白テキストを抽出）
+    _, white = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+    enlarged = cv2.resize(white, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    text = " ".join(reader.readtext(cv2.cvtColor(enlarged, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False, allowlist="T0123456789"))
+    val = _parse(text)
+    if val is not None:
+        return val
+
+    # 試行4: CLAHE でコントラスト強調
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
     enhanced = cv2.resize(clahe.apply(gray), None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False))
+    text = " ".join(reader.readtext(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False, allowlist="T0123456789"))
     return _parse(text)
 
 
@@ -409,16 +440,15 @@ def extract_student_data(image: np.ndarray) -> dict[str, Any]:
         result[key] = ocr_skill_level(roi)
 
     # 固有武器/星ランク
-    # 黄色い星を先に数える。星4未満は固有武器を持てないため固有星のチェックは不要。
-    # 星4の場合のみ青い固有星を追加確認する。
-    star_count = count_filled_stars(crop_roi(image, "portrait_stars"))
-    if 1 <= star_count <= 3:
-        result["limit_break"] = star_count
-    elif star_count == 4:
-        unique_count = count_unique_stars(crop_roi(image, "unique_stars"))
-        result["limit_break"] = (4 + unique_count) if unique_count > 0 else 4
+    # 固有レベル（青い星）を先に確認する。
+    # 青い星が検出できた場合 = 固有XX（limit_break 5〜8）。
+    # 青い星がない場合 = 黄色い星の数が limit_break（1〜4）。
+    unique_count = count_unique_stars(crop_roi(image, "unique_stars"))
+    if 1 <= unique_count <= 4:
+        result["limit_break"] = 4 + unique_count
     else:
-        result["limit_break"] = None
+        star_count = min(count_filled_stars(crop_roi(image, "portrait_stars")), 4)
+        result["limit_break"] = star_count if 1 <= star_count <= 4 else None
 
     # 装備Tier (結合OCR + O→0変換)
     for i, key in enumerate(("equip1_tier", "equip2_tier", "equip3_tier"), 1):

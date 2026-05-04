@@ -20,7 +20,7 @@ from models import (
     StudentCreate,
     CaptureResult,
 )
-from students_master import STUDENTS_MASTER
+from students_master import STUDENTS_MASTER, STUDENTS_INFO
 
 app = FastAPI(title="ブルーアーカイブ育成管理")
 
@@ -54,8 +54,26 @@ def _seed_students():
     db = SessionLocal()
     try:
         for name in STUDENTS_MASTER:
-            if not db.query(Student).filter(Student.name == name).first():
-                db.add(Student(name=name))
+            student = db.query(Student).filter(Student.name == name).first()
+            info = STUDENTS_INFO.get(name, {})
+            if not student:
+                db.add(Student(
+                    name=name,
+                    role=info.get("role"),
+                    position=info.get("position"),
+                    student_class=info.get("cls"),
+                    school=info.get("school"),
+                    atk_type=info.get("atk_type"),
+                    def_type=info.get("def_type"),
+                ))
+            else:
+                # 既存レコードの固定情報を更新
+                student.role = info.get("role")
+                student.position = info.get("position")
+                student.student_class = info.get("cls")
+                student.school = info.get("school")
+                student.atk_type = info.get("atk_type")
+                student.def_type = info.get("def_type")
         db.commit()
     finally:
         db.close()
@@ -68,8 +86,9 @@ def _do_capture():
         print("⚠️  ゲームウィンドウが見つかりません")
         return
     data = ext.extract_student_data(image)
+    img_b64 = _image_to_base64_jpeg(image)
     with _pending_lock:
-        _pending_capture = CaptureResult(**data)
+        _pending_capture = CaptureResult(**data, image=img_b64)
     print(f"📸 キャプチャ完了: {data.get('name', '不明')}")
 
 
@@ -87,6 +106,12 @@ def _to_response(student: Student) -> StudentResponse:
         id=student.id,
         name=student.name,
         is_joined=student.is_joined,
+        role=student.role,
+        position=student.position,
+        student_class=student.student_class,
+        school=student.school,
+        atk_type=student.atk_type,
+        def_type=student.def_type,
         bond_level=student.bond_level,
         wb_hp=student.wb_hp,
         wb_atk=student.wb_atk,

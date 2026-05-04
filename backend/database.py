@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from datetime import datetime
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./bluearchive.db"
@@ -17,6 +18,14 @@ class Student(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)
+
+    # 固定情報（マスターデータ）
+    role          = Column(String, nullable=True)   # STRIKER / SPECIAL
+    position      = Column(String, nullable=True)   # FRONT / MIDDLE / BACK
+    student_class = Column(String, nullable=True)   # アタッカー / サポーターなど
+    school        = Column(String, nullable=True)   # ミレニアム / ゲヘナなど
+    atk_type      = Column(String, nullable=True)   # 爆発 / 貫通 / 神秘 / 振動
+    def_type      = Column(String, nullable=True)   # 軽装備 / 重装甲 / 特殊装甲 / 弾力装甲
 
     # 育成状況（NULLなら未加入）
     bond_level = Column(Integer, nullable=True)         # 絆レベル
@@ -61,3 +70,22 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_add_static_columns()
+
+
+def _migrate_add_static_columns():
+    static_cols = [
+        ("role", "VARCHAR"),
+        ("position", "VARCHAR"),
+        ("student_class", "VARCHAR"),
+        ("school", "VARCHAR"),
+        ("atk_type", "VARCHAR"),
+        ("def_type", "VARCHAR"),
+    ]
+    with engine.begin() as conn:
+        result = conn.execute(text("PRAGMA table_info(students)"))
+        existing = {row[1] for row in result.fetchall()}
+        for col, col_type in static_cols:
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE students ADD COLUMN {col} {col_type}"))
+

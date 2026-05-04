@@ -59,6 +59,10 @@ export async function checkStatus(): Promise<{
   return request("/status");
 }
 
+export async function fetchMasterStudents(): Promise<string[]> {
+  return request<string[]>("/master/students");
+}
+
 export async function fetchDebugCapture(): Promise<{
   width: number;
   height: number;

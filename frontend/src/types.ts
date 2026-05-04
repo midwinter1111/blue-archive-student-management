@@ -2,6 +2,12 @@ export interface Student {
   id: number;
   name: string;
   is_joined: boolean;
+  role: string | null;
+  position: string | null;
+  student_class: string | null;
+  school: string | null;
+  atk_type: string | null;
+  def_type: string | null;
   bond_level: number | null;
   wb_hp: number | null;
   wb_atk: number | null;
@@ -37,6 +43,7 @@ export interface CaptureResult {
   equip1: number | null;
   equip2: number | null;
   equip3: number | null;
+  image: string | null;
 }
 
 export interface StudentUpdate {
@@ -57,4 +64,10 @@ export interface StudentUpdate {
 export interface FilterState {
   name: string;
   join: "all" | "joined" | "not_joined";
+  schools: string[];
+  roles: string[];
+  atk_types: string[];
+  def_types: string[];
+  classes: string[];
+  positions: string[];
 }

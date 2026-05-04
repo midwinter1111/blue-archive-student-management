@@ -7,6 +7,13 @@ class StudentResponse(BaseModel):
     id: int
     name: str
     is_joined: bool
+    # 固定情報
+    role: Optional[str]
+    position: Optional[str]
+    student_class: Optional[str]
+    school: Optional[str]
+    atk_type: Optional[str]
+    def_type: Optional[str]
     bond_level: Optional[int]
     wb_hp: Optional[int]
     wb_atk: Optional[int]
@@ -66,6 +73,7 @@ class CaptureResult(BaseModel):
     equip1: Optional[int]
     equip2: Optional[int]
     equip3: Optional[int]
+    image: Optional[str] = None
 
 
 class FilterParams(BaseModel):

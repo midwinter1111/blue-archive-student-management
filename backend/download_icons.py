@@ -1,0 +1,369 @@
+"""
+Wikiからキャラクターアイコンをダウンロードするスクリプト
+対象: https://bluearchive.wikiru.jp/?キャラクター一覧
+保存先: ../frontend/public/student-icons/{生徒名}.png
+"""
+import os
+import sys
+import time
+import urllib.request
+import urllib.error
+
+sys.path.insert(0, os.path.dirname(__file__))
+from students_master import STUDENTS_MASTER
+
+BASE_URL = "https://bluearchive.wikiru.jp/"
+OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "public", "student-icons")
+
+# Wikiのファイル名(アイコン名部分) → STUDENTS_MASTER名 のマッピング
+# ルール: wiki名が STUDENTS_MASTER 名と完全一致しない場合のみ記載
+WIKI_NAME_MAP: dict[str, str] = {
+    # アンダースコア形式 → 括弧形式
+    "アズサ_水着":              "アズサ（水着）",
+    "ヒフミ_水着":              "ヒフミ（水着）",
+    "マシロ_水着":              "マシロ（水着）",
+    "ツルギ_水着":              "ツルギ（水着）",
+    # 仮アイコン（プレースホルダー）→ 通常名
+    "アコ":                    "アコ",
+    "カエデ":                  "カエデ",
+    "マリナ":                  "マリナ",
+    "ミモリ":                  "ミモリ",
+    "トモエ":                  "トモエ",
+    # icon2 / icon_v2 / 特殊サフィックス → 通常名（名前自体は同じ）
+    "ウミカ":                  "ウミカ",
+    "カズサ":                  "カズサ",
+    "サキ":                    "サキ",
+    "サクラコ":                "サクラコ",
+    "ナグサ":                  "ナグサ",
+    "ケイ":                    "ケイ",
+    "メル":                    "メル",
+    "モミジ":                  "モミジ",
+    "イブキ":                  "イブキ",
+    "オトギ":                  "オトギ",
+    "キサキ":                  "キサキ",
+    "セイア":                  "セイア",
+    # ホシノ（臨戦）はスタイル1を使用
+    "ホシノ（臨戦）スタイル1": "ホシノ（臨戦）",
+}
+
+# WikiページのURLパス一覧（wikiファイル名 → attachパス）
+# PowerShellで抽出済みのデータをそのまま記載
+WIKI_ICONS: dict[str, str] = {
+    "アカネ（バニーガール）":   "attach2/696D67_E382A2E382ABE3838DEFBC88E38390E3838BE383BCE382ACE383BCE383ABEFBC895F69636F6E2E706E67.png",
+    "アカネ（制服）":           "attach2/696D67_E382A2E382ABE3838DEFBC88E588B6E69C8DEFBC895F69636F6E2E706E67.png",
+    "アカリ（正月）":           "attach2/696D67_E382A2E382ABE383AAEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "アコ":                    "attach2/696D67_E382A2E382B35FE4BBAE69636F6E2E706E67.png",
+    "アコ（ドレス）":           "attach2/696D67_E382A2E382B3EFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "アズサ":                  "attach2/696D67_E382A2E382BAE382B55F69636F6E2E706E67.png",
+    "アズサ（水着）":           "attach2/696D67_E382A2E382BAE382B55FE6B0B4E79D805F69636F6E2E706E67.png",
+    "アスナ（バニーガール）":   "attach2/696D67_E382A2E382B9E3838AEFBC88E38390E3838BE383BCE382ACE383BCE383ABEFBC895F69636F6E2E706E67.png",
+    "アスナ（制服）":           "attach2/696D67_E382A2E382B9E3838AEFBC88E588B6E69C8DEFBC895F69636F6E2E706E67.png",
+    "アツコ":                  "attach2/696D67_E382A2E38384E382B35F69636F6E2E706E67.png",
+    "アリス":                  "attach2/696D67_E382A2E383AAE382B95F69636F6E2E706E67.png",
+    "アリス（メイド）":         "attach2/696D67_E382A2E383AAE382B9EFBC88E383A1E382A4E38389EFBC895F69636F6E2E706E67.png",
+    "アリス（臨戦）":           "attach2/696D67_E382A2E383AAE382B9EFBC88E887A8E688A6EFBC895F69636F6E2E706E67.png",
+    "アル":                    "attach2/696D67_E382A2E383AB5F69636F6E2E706E67.png",
+    "アル（正月）":             "attach2/696D67_E382A2E383ABEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "アル（ドレス）":           "attach2/696D67_E382A2E383ABEFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "イオリ":                  "attach2/696D67_E382A4E382AAE383AA5F69636F6E2E706E67.png",
+    "イオリ（水着）":           "attach2/696D67_E382A4E382AAE383AAEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "イズナ":                  "attach2/696D67_E382A4E382BAE3838A5F69636F6E2E706E67.png",
+    "イズナ（水着）":           "attach2/696D67_E382A4E382BAE3838AEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "イズミ":                  "attach2/696D67_E382A4E382BAE3839F5F69636F6E2E706E67.png",
+    "イズミ（正月）":           "attach2/696D67_E382A4E382BAE3839FEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "イズミ（水着）":           "attach2/696D67_E382A4E382BAE3839FEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "イチカ":                  "attach2/696D67_E382A4E38381E382AB5F69636F6E2E706E67.png",
+    "イチカ（水着）":           "attach2/696D67_E382A4E38381E382ABEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "イブキ":                  "attach2/696D67_E382A4E38396E382AD5F69636F6E322E706E67.png",
+    "イロハ":                  "attach2/696D67_E382A4E383ADE3838F5F69636F6E2E706E67.png",
+    "ウイ":                    "attach2/696D67_E382A6E382A45F69636F6E2E706E67.png",
+    "ウイ（水着）":             "attach2/696D67_E382A6E382A4EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ウタハ":                  "attach2/696D67_E382A6E382BFE3838F5F69636F6E2E706E67.png",
+    "ウタハ（応援団）":         "attach2/696D67_E382A6E382BFE3838FEFBC88E5BF9CE68FB4E59BA3EFBC895F69636F6E2E706E67.png",
+    "ウミカ":                  "attach2/696D67_E382A6E3839FE382AB5F69636F6E322E706E67.png",
+    "エイミ":                  "attach2/696D67_E382A8E382A4E3839F5F69636F6E2E706E67.png",
+    "エイミ（水着）":           "attach2/696D67_E382A8E382A4E3839FEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "エイミ（臨戦）":           "attach2/696D67_E382A8E382A4E3839FEFBC88E887A8E688A6EFBC895F69636F6E2E706E67.png",
+    "エリ":                    "attach2/696D67_E382A8E383AA5F69636F6E2E706E67.png",
+    "カエデ":                  "attach2/696D67_E382ABE382A8E383875FE4BBAE69636F6E2E706E67.png",
+    "カズサ":                  "attach2/696D67_E382ABE382BAE382B55F69636F6E322E706E67.png",
+    "カズサ（バンド）":         "attach2/696D67_E382ABE382BAE382B5EFBC88E38390E383B3E38389EFBC895F69636F6E2E706E67.png",
+    "カスミ":                  "attach2/696D67_E382ABE382B9E3839F5F69636F6E2E706E67.png",
+    "カノエ":                  "attach2/696D67_E382ABE3838EE382A85F69636F6E2E706E67.png",
+    "カホ":                    "attach2/696D67_E382ABE3839B5F69636F6E2E706E67.png",
+    "カヨコ":                  "attach2/696D67_E382ABE383A8E382B35F69636F6E2E706E67.png",
+    "カヨコ（正月）":           "attach2/696D67_E382ABE383A8E382B3EFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "カヨコ（ドレス）":         "attach2/696D67_E382ABE383A8E382B3EFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "カリン":                  "attach2/696D67_E382ABE383AAE383B35F69636F6E2E706E67.png",
+    "カリン（バニーガール）":   "attach2/696D67_E382ABE383AAE383B3EFBC88E38390E3838BE383BCE382ACE383BCE383ABEFBC895F69636F6E2E706E67.png",
+    "カリン（制服）":           "attach2/696D67_E382ABE383AAE383B3EFBC88E588B6E69C8DEFBC895F69636F6E2E706E67.png",
+    "カンナ":                  "attach2/696D67_E382ABE383B3E3838A5F69636F6E2E706E67.png",
+    "カンナ（水着）":           "attach2/696D67_E382ABE383B3E3838AEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "キキョウ":                "attach2/696D67_E382ADE382ADE383A7E382A65F69636F6E2E706E67.png",
+    "キキョウ（水着）":         "attach2/696D67_E382ADE382ADE383A7E382A6EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "キサキ":                  "attach2/696D67_E382ADE382B5E382AD5F69636F6E5F76322E706E67.png",
+    "キリノ":                  "attach2/696D67_E382ADE383AAE3838E5F69636F6E2E706E67.png",
+    "キリノ（水着）":           "attach2/696D67_E382ADE383AAE3838EEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "キララ":                  "attach2/696D67_E382ADE383A9E383A95F69636F6E2E706E67.png",
+    "クルミ":                  "attach2/696D67_E382AFE383ABE3839F5F69636F6E2E706E67.png",
+    "ケイ":                    "attach2/696D67_E382B1E382A45F69636F6E322E706E67.png",
+    "ココナ":                  "attach2/696D67_E382B3E382B3E3838A5F69636F6E2E706E67.png",
+    "コタマ":                  "attach2/696D67_E382B3E382BFE3839E5F69636F6E2E706E67.png",
+    "コタマ（キャンプ）":       "attach2/696D67_E382B3E382BFE3839EEFBC88E382ADE383A3E383B3E38397EFBC895F69636F6E2E706E67.png",
+    "コトリ":                  "attach2/696D67_E382B3E38388E383AA5F69636F6E2E706E67.png",
+    "コトリ（応援団）":         "attach2/696D67_E382B3E38388E383AAEFBC88E5BF9CE68FB4E59BA3EFBC895F69636F6E2E706E67.png",
+    "コノカ":                  "attach2/696D67_E382B3E3838EE382AB5F69636F6E2E706E67.png",
+    "コハル":                  "attach2/696D67_E382B3E3838FE383AB5F69636F6E2E706E67.png",
+    "コハル（水着）":           "attach2/696D67_E382B3E3838FE383ABEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "コユキ":                  "attach2/696D67_E382B3E383A6E382AD5F69636F6E2E706E67.png",
+    "コユキ（パジャマ）":       "attach2/696D67_E382B3E383A6E382ADEFBC88E38391E382B8E383A3E3839EEFBC895F69636F6E2E706E67.png",
+    "サオリ":                  "attach2/696D67_E382B5E382AAE383AA5F69636F6E2E706E67.png",
+    "サオリ（水着）":           "attach2/696D67_E382B5E382AAE383AAEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "サオリ（ドレス）":         "attach2/696D67_E382B5E382AAE383AAEFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "サキ":                    "attach2/696D67_E382B5E382AD5F69636F6E322E706E67.png",
+    "サキ（水着）":             "attach2/696D67_E382B5E382ADEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "サクラコ":                "attach2/696D67_E382B5E382AFE383A9E382B35F69636F6E322E706E67.png",
+    "サクラコ（アイドル）":     "attach2/696D67_E382B5E382AFE383A9E382B3EFBC88E382A2E382A4E38389E383ABEFBC895F69636F6E2E706E67.png",
+    "サツキ":                  "attach2/696D67_E382B5E38384E382AD5F69636F6E2E706E67.png",
+    "サヤ":                    "attach2/696D67_E382B5E383A45F69636F6E2E706E67.png",
+    "サヤ（私服）":             "attach2/696D67_E382B5E383A4EFBC88E7A781E69C8DEFBC895F69636F6E2E706E67.png",
+    "シグレ":                  "attach2/696D67_E382B7E382B0E383AC5F69636F6E2E706E67.png",
+    "シグレ（温泉）":           "attach2/696D67_E382B7E382B0E383ACEFBC88E6B8A9E6B389EFBC895F69636F6E2E706E67.png",
+    "シズコ":                  "attach2/696D67_E382B7E382BAE382B35F69636F6E2E706E67.png",
+    "シズコ（水着）":           "attach2/696D67_E382B7E382BAE382B3EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "シミコ":                  "attach2/696D67_E382B7E3839FE382B35F69636F6E2E706E67.png",
+    "ジュリ":                  "attach2/696D67_E382B8E383A5E383AA5F69636F6E2E706E67.png",
+    "ジュリ（アルバイト）":     "attach2/696D67_E382B8E383A5E383AAEFBC88E382A2E383ABE38390E382A4E38388EFBC895F69636F6E2E706E67.png",
+    "ジュンコ":                "attach2/696D67_E382B8E383A5E383B3E382B35F69636F6E2E706E67.png",
+    "ジュンコ（正月）":         "attach2/696D67_E382B8E383A5E383B3E382B3EFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "シュン":                  "attach2/696D67_E382B7E383A5E383B35F69636F6E2E706E67.png",
+    "シュン（幼女）":           "attach2/696D67_E382B7E383A5E383B3EFBC88E5B9BCE5A5B3EFBC895F69636F6E2E706E67.png",
+    "シロコ":                  "attach2/696D67_E382B7E383ADE382B35F69636F6E2E706E67.png",
+    "シロコ（ライディング）":   "attach2/696D67_E382B7E383ADE382B3EFBC88E383A9E382A4E38387E382A3E383B3E382B0EFBC895F69636F6E2E706E67.png",
+    "シロコ（水着）":           "attach2/696D67_E382B7E383ADE382B3EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "シロコ＊テラー":           "attach2/696D67_E382B7E383ADE382B3EFBC8AE38386E383A9E383BC5F69636F6E2E706E67.png",
+    "スズミ":                  "attach2/696D67_E382B9E382BAE3839F5F69636F6E2E706E67.png",
+    "スズミ（マジカル）":       "attach2/696D67_E382B9E382BAE3839FEFBC88E3839EE382B8E382ABE383ABEFBC895F69636F6E2E706E67.png",
+    "スバル":                  "attach2/696D67_E382B9E38390E383AB5F69636F6E2E706E67.png",
+    "スミレ":                  "attach2/696D67_E382B9E3839FE383AC5F69636F6E2E706E67.png",
+    "スミレ（アルバイト）":     "attach2/696D67_E382B9E3839FE383ACEFBC88E382A2E383ABE38390E382A4E38388EFBC895F69636F6E2E706E67.png",
+    "セイア":                  "attach2/696D67_E382BBE382A4E382A25F69636F6E5FE7AB8BE381A1E7B5B5E6BA96E68BA02E706E67.png",
+    "セイア（水着）":           "attach2/696D67_E382BBE382A4E382A2EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "セナ":                    "attach2/696D67_E382BBE3838A5F69636F6E2E706E67.png",
+    "セナ（私服）":             "attach2/696D67_E382BBE3838AEFBC88E7A781E69C8DEFBC895F69636F6E2E706E67.png",
+    "セリカ":                  "attach2/696D67_E382BBE383AAE382AB5F69636F6E2E706E67.png",
+    "セリカ（正月）":           "attach2/696D67_E382BBE383AAE382ABEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "セリカ（水着）":           "attach2/696D67_E382BBE383AAE382ABEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "セリナ":                  "attach2/696D67_E382BBE383AAE3838A5F69636F6E2E706E67.png",
+    "セリナ（クリスマス）":     "attach2/696D67_E382BBE383AAE3838AEFBC88E382AFE383AAE382B9E3839EE382B9EFBC895F69636F6E2E706E67.png",
+    "タカネ":                  "attach2/696D67_E382BFE382ABE3838D5F69636F6E2E706E67.png",
+    "チアキ":                  "attach2/696D67_E38381E382A2E382AD5F69636F6E2E706E67.png",
+    "チェリノ":                "attach2/696D67_E38381E382A7E383AAE3838E5F69636F6E2E706E67.png",
+    "チェリノ（温泉）":         "attach2/696D67_E38381E382A7E383AAE3838EEFBC88E6B8A9E6B389EFBC895F69636F6E2E706E67.png",
+    "チセ":                    "attach2/696D67_E38381E382BB5F69636F6E2E706E67.png",
+    "チセ（水着）":             "attach2/696D67_E38381E382BBEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "チナツ":                  "attach2/696D67_E38381E3838AE383845F69636F6E2E706E67.png",
+    "チナツ（温泉）":           "attach2/696D67_E38381E3838AE38384EFBC88E6B8A9E6B389EFBC895F69636F6E2E706E67.png",
+    "チヒロ":                  "attach2/696D67_E38381E38392E383AD5F69636F6E2E706E67.png",
+    "ツクヨ":                  "attach2/696D67_E38384E382AFE383A85F69636F6E2E706E67.png",
+    "ツクヨ（ドレス）":         "attach2/696D67_E38384E382AFE383A8EFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "ツバキ":                  "attach2/696D67_E38384E38390E382AD5F69636F6E2E706E67.png",
+    "ツバキ（ガイド）":         "attach2/696D67_E38384E38390E382ADEFBC88E382ACE382A4E38389EFBC895F69636F6E2E706E67.png",
+    "ツルギ":                  "attach2/696D67_E38384E383ABE382AE5F69636F6E2E706E67.png",
+    "ツルギ（水着）":           "attach2/696D67_E38384E383ABE382AE5FE6B0B4E79D805F69636F6E2E706E67.png",
+    "トキ":                    "attach2/696D67_E38388E382AD5F69636F6E2E706E67.png",
+    "トキ（バニーガール）":     "attach2/696D67_E38388E382ADEFBC88E38390E3838BE383BCE382ACE383BCE383ABEFBC895F69636F6E2E706E67.png",
+    "トキ（臨戦）":             "attach2/696D67_E38388E382ADEFBC88E887A8E688A6EFBC895F69636F6E2E706E67.png",
+    "トモエ":                  "attach2/696D67_E38388E383A2E382A85FE4BBAE69636F6E2E706E67.png",
+    "トモエ（チーパオ）":       "attach2/696D67_E38388E383A2E382A8EFBC88E38381E383BCE38391E382AAEFBC895F69636F6E2E706E67.png",
+    "ナギサ":                  "attach2/696D67_E3838AE382AEE382B55F69636F6E2E706E67.png",
+    "ナギサ（水着）":           "attach2/696D67_E3838AE382AEE382B5EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ナグサ":                  "attach2/696D67_E3838AE382B0E382B55F69636F6E322E706E67.png",
+    "ナツ":                    "attach2/696D67_E3838AE383845F69636F6E2E706E67.png",
+    "ナツ（バンド）":           "attach2/696D67_E3838AE38384EFBC88E38390E383B3E38389EFBC895F69636F6E2E706E67.png",
+    "ニコ":                    "attach2/696D67_E3838BE382B35F69636F6E2E706E67.png",
+    "ニヤ":                    "attach2/696D67_E3838BE383A45F69636F6E2E706E67.png",
+    "ネル":                    "attach2/696D67_E3838DE383AB5F69636F6E2E706E67.png",
+    "ネル（バニーガール）":     "attach2/696D67_E3838DE383ABEFBC88E38390E3838BE383BCE382ACE383BCE383ABEFBC895F69636F6E2E706E67.png",
+    "ネル（制服）":             "attach2/696D67_E3838DE383ABEFBC88E588B6E69C8DEFBC895F69636F6E2E706E67.png",
+    "ノア":                    "attach2/696D67_E3838EE382A25F69636F6E2E706E67.png",
+    "ノア（パジャマ）":         "attach2/696D67_E3838EE382A2EFBC88E38391E382B8E383A3E3839EEFBC895F69636F6E2E706E67.png",
+    "ノゾミ":                  "attach2/696D67_E3838EE382BEE3839F5F69636F6E2E706E67.png",
+    "ノドカ":                  "attach2/696D67_E3838EE38389E382AB5F69636F6E2E706E67.png",
+    "ノドカ（温泉）":           "attach2/696D67_E3838EE38389E382ABEFBC88E6B8A9E6B389EFBC895F69636F6E2E706E67.png",
+    "ノノミ":                  "attach2/696D67_E3838EE3838EE3839F5F69636F6E2E706E67.png",
+    "ノノミ（水着）":           "attach2/696D67_E3838EE3838EE3839FEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ハスミ":                  "attach2/696D67_E3838FE382B9E3839F5F69636F6E2E706E67.png",
+    "ハスミ（水着）":           "attach2/696D67_E3838FE382B9E3839FEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ハスミ（体操服）":         "attach2/696D67_E3838FE382B9E3839FEFBC88E4BD93E6938DE69C8DEFBC895F69636F6E2E706E67.png",
+    "ハナエ":                  "attach2/696D67_E3838FE3838AE382A85F69636F6E2E706E67.png",
+    "ハナエ（クリスマス）":     "attach2/696D67_E3838FE3838AE382A8EFBC88E382AFE383AAE382B9E3839EE382B9EFBC895F69636F6E2E706E67.png",
+    "ハナコ":                  "attach2/696D67_E3838FE3838AE382B35F69636F6E2E706E67.png",
+    "ハナコ（水着）":           "attach2/696D67_E3838FE3838AE382B3EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ハルカ":                  "attach2/696D67_E3838FE383ABE382AB5F69636F6E2E706E67.png",
+    "ハルカ（正月）":           "attach2/696D67_E3838FE383ABE382ABEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "ハルナ":                  "attach2/696D67_E3838FE383ABE3838A5F69636F6E2E706E67.png",
+    "ハルナ（正月）":           "attach2/696D67_E3838FE383ABE3838AEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "ハルナ（体操服）":         "attach2/696D67_E3838FE383ABE3838AEFBC88E4BD93E6938DE69C8DEFBC895F69636F6E2E706E67.png",
+    "ハレ":                    "attach2/696D67_E3838FE383AC5F69636F6E2E706E67.png",
+    "ハレ（キャンプ）":         "attach2/696D67_E3838FE383ACEFBC88E382ADE383A3E383B3E38397EFBC895F69636F6E2E706E67.png",
+    "ヒカリ":                  "attach2/696D67_E38392E382ABE383AA5F69636F6E2E706E67.png",
+    "ヒナ":                    "attach2/696D67_E38392E3838A5F69636F6E2E706E67.png",
+    "ヒナ（水着）":             "attach2/696D67_E38392E3838AEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ヒナ（ドレス）":           "attach2/696D67_E38392E3838AEFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "ヒナタ":                  "attach2/696D67_E38392E3838AE382BF5F69636F6E2E706E67.png",
+    "ヒナタ（水着）":           "attach2/696D67_E38392E3838AE382BFEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ヒビキ":                  "attach2/696D67_E38392E38393E382AD5F69636F6E2E706E67.png",
+    "ヒビキ（応援団）":         "attach2/696D67_E38392E38393E382ADEFBC88E5BF9CE68FB4E59BA3EFBC895F69636F6E2E706E67.png",
+    "ヒフミ":                  "attach2/696D67_E38392E38395E3839F5F69636F6E2E706E67.png",
+    "ヒフミ（水着）":           "attach2/696D67_E38392E38395E3839F5FE6B0B4E79D805F69636F6E2E706E67.png",
+    "ヒマリ":                  "attach2/696D67_E38392E3839EE383AA5F69636F6E2E706E67.png",
+    "ヒマリ（臨戦）":           "attach2/696D67_E38392E3839EE383AAEFBC88E887A8E688A6EFBC895F69636F6E2E706E67.png",
+    "ヒヨリ":                  "attach2/696D67_E38392E383A8E383AA5F69636F6E2E706E67.png",
+    "ヒヨリ（水着）":           "attach2/696D67_E38392E383A8E383AAEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "フィーナ":                "attach2/696D67_E38395E382A3E383BCE3838A5F69636F6E2E706E67.png",
+    "フィーナ（ガイド）":       "attach2/696D67_E38395E382A3E383BCE3838AEFBC88E382ACE382A4E38389EFBC895F69636F6E2E706E67.png",
+    "フウカ":                  "attach2/696D67_E38395E382A6E382AB5F69636F6E2E706E67.png",
+    "フウカ（正月）":           "attach2/696D67_E38395E382A6E382ABEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "フブキ":                  "attach2/696D67_E38395E38396E382AD5F69636F6E2E706E67.png",
+    "フブキ（水着）":           "attach2/696D67_E38395E38396E382ADEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "フユ":                    "attach2/696D67_E38395E383A65F69636F6E2E706E67.png",
+    "ホシノ":                  "attach2/696D67_E3839BE382B7E3838E5F69636F6E2E706E67.png",
+    "ホシノ（水着）":           "attach2/696D67_E3839BE382B7E3838EEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ホシノ（臨戦）":           "attach2/696D67_E3839BE382B7E3838EEFBC88E887A8E688A6EFBC89E382B9E382BFE382A4E383AB315F69636F6E2E706E67.png",
+    "マキ":                    "attach2/696D67_E3839EE382AD5F69636F6E2E706E67.png",
+    "マキ（キャンプ）":         "attach2/696D67_E3839EE382ADEFBC88E382ADE383A3E383B3E38397EFBC895F69636F6E2E706E67.png",
+    "マコト":                  "attach2/696D67_E3839EE382B3E383885F69636F6E2E706E67.png",
+    "マシロ":                  "attach2/696D67_E3839EE382B7E383AD5F69636F6E2E706E67.png",
+    "マシロ（水着）":           "attach2/696D67_E3839EE382B7E383AD5FE6B0B4E79D805F69636F6E2E706E67.png",
+    "マリー":                  "attach2/696D67_E3839EE383AAE383BC5F69636F6E2E706E67.png",
+    "マリー（体操服）":         "attach2/696D67_E3839EE383AAE383BCEFBC88E4BD93E6938DE69C8DEFBC895F69636F6E2E706E67.png",
+    "マリー（アイドル）":       "attach2/696D67_E3839EE383AAE383BCEFBC88E382A2E382A4E38389E383ABEFBC895F69636F6E2E706E67.png",
+    "マリナ":                  "attach2/696D67_E3839EE383AAE3838A5FE4BBAE69636F6E2E706E67.png",
+    "マリナ（チーパオ）":       "attach2/696D67_E3839EE383AAE3838AEFBC88E38381E383BCE38391E382AAEFBC895F69636F6E2E706E67.png",
+    "ミカ":                    "attach2/696D67_E3839FE382AB5F69636F6E2E706E67.png",
+    "ミカ（水着）":             "attach2/696D67_E3839FE382ABEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ミサキ":                  "attach2/696D67_E3839FE382B5E382AD5F69636F6E2E706E67.png",
+    "ミサキ（水着）":           "attach2/696D67_E3839FE382B5E382ADEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ミチル":                  "attach2/696D67_E3839FE38381E383AB5F69636F6E2E706E67.png",
+    "ミチル（ドレス）":         "attach2/696D67_E3839FE38381E383ABEFBC88E38389E383ACE382B9EFBC895F69636F6E2E706E67.png",
+    "ミドリ":                  "attach2/696D67_E3839FE38389E383AA5F69636F6E2E706E67.png",
+    "ミドリ（メイド）":         "attach2/696D67_E3839FE38389E383AAEFBC88E383A1E382A4E38389EFBC895F69636F6E2E706E67.png",
+    "ミナ":                    "attach2/696D67_E3839FE3838A5F69636F6E2E706E67.png",
+    "ミネ":                    "attach2/696D67_E3839FE3838D5F69636F6E2E706E67.png",
+    "ミネ（アイドル）":         "attach2/696D67_E3839FE3838DEFBC88E382A2E382A4E38389E383ABEFBC895F69636F6E2E706E67.png",
+    "ミノリ":                  "attach2/696D67_E3839FE3838EE383AA5F69636F6E2E706E67.png",
+    "ミモリ":                  "attach2/696D67_E3839FE383A2E383AA5FE4BBAE69636F6E2E706E67.png",
+    "ミモリ（水着）":           "attach2/696D67_E3839FE383A2E383AAEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ミヤコ":                  "attach2/696D67_E3839FE383A4E382B35F69636F6E2E706E67.png",
+    "ミヤコ（水着）":           "attach2/696D67_E3839FE383A4E382B3EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ミユ":                    "attach2/696D67_E3839FE383A65F69636F6E2E706E67.png",
+    "ミユ（水着）":             "attach2/696D67_E3839FE383A6EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ミヨ":                    "attach2/696D67_E3839FE383A85F69636F6E2E706E67.png",
+    "ムツキ":                  "attach2/696D67_E383A0E38384E382AD5F69636F6E2E706E67.png",
+    "ムツキ（正月）":           "attach2/696D67_E383A0E38384E382ADEFBC88E6ADA3E69C88EFBC895F69636F6E2E706E67.png",
+    "メグ":                    "attach2/696D67_E383A1E382B05F69636F6E2E706E67.png",
+    "メル":                    "attach2/696D67_E383A1E383AB5F69636F6E322E706E67.png",
+    "モエ":                    "attach2/696D67_E383A2E382A85F69636F6E2E706E67.png",
+    "モエ（水着）":             "attach2/696D67_E383A2E382A8EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "モミジ":                  "attach2/696D67_E383A2E3839FE382B85F69636F6E322E706E67.png",
+    "モモイ":                  "attach2/696D67_E383A2E383A2E382A45F69636F6E2E706E67.png",
+    "モモイ（メイド）":         "attach2/696D67_E383A2E383A2E382A4EFBC88E383A1E382A4E38389EFBC895F69636F6E2E706E67.png",
+    "ヤクモ":                  "attach2/696D67_E383A4E382AFE383A25F69636F6E2E706E67.png",
+    "ユウカ":                  "attach2/696D67_E383A6E382A6E382AB5F69636F6E2E706E67.png",
+    "ユウカ（体操服）":         "attach2/696D67_E383A6E382A6E382ABEFBC88E4BD93E6938DE69C8DEFBC895F69636F6E2E706E67.png",
+    "ユウカ（パジャマ）":       "attach2/696D67_E383A6E382A6E382ABEFBC88E38391E382B8E383A3E3839EEFBC895F69636F6E2E706E67.png",
+    "ユカリ":                  "attach2/696D67_E383A6E382ABE383AA5F69636F6E2E706E67.png",
+    "ユカリ（水着）":           "attach2/696D67_E383A6E382ABE383AAEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ユズ":                    "attach2/696D67_E383A6E382BA5F69636F6E2E706E67.png",
+    "ユズ（臨戦）":             "attach2/696D67_E383A6E382BAEFBC88E887A8E688A6EFBC895F69636F6E2E706E67.png",
+    "ユズ（メイド）":           "attach2/696D67_E383A6E382BAEFBC88E383A1E382A4E38389EFBC895F69636F6E2E706E67.png",
+    "ヨシミ":                  "attach2/696D67_E383A8E382B7E3839F5F69636F6E2E706E67.png",
+    "ヨシミ（バンド）":         "attach2/696D67_E383A8E382B7E3839FEFBC88E38390E383B3E38389EFBC895F69636F6E2E706E67.png",
+    "ラブ":                    "attach2/696D67_E383A9E383965F69636F6E2E706E67.png",
+    "リオ":                    "attach2/696D67_E383AAE382AA5F69636F6E2E706E67.png",
+    "リオ（臨戦）":             "attach2/696D67_E383AAE382AAEFBC88E887A8E688A6EFBC895F69636F6E2E706E67.png",
+    "リツ":                    "attach2/696D67_E383AAE383845F69636F6E2E706E67.png",
+    "ルミ":                    "attach2/696D67_E383ABE3839F5F69636F6E2E706E67.png",
+    "レイ":                    "attach2/696D67_E383ACE382A45F69636F6E2E706E67.png",
+    "レイサ":                  "attach2/696D67_E383ACE382A4E382B55F69636F6E2E706E67.png",
+    "レイサ（マジカル）":       "attach2/696D67_E383ACE382A4E382B5EFBC88E3839EE382B8E382ABE383ABEFBC895F69636F6E2E706E67.png",
+    "レイジョ":                "attach2/696D67_E383ACE382A4E382B8E383A75F69636F6E2E706E67.png",
+    "レナ":                    "attach2/696D67_E383ACE3838A5F69636F6E2E706E67.png",
+    "レンゲ":                  "attach2/696D67_E383ACE383B3E382B25F69636F6E2E706E67.png",
+    "レンゲ（水着）":           "attach2/696D67_E383ACE383B3E382B2EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "ワカモ":                  "attach2/696D67_E383AFE382ABE383A25F69636F6E2E706E67.png",
+    "ワカモ（水着）":           "attach2/696D67_E383AFE382ABE383A2EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "アイリ":                  "attach2/696D67_E382A2E382A4E383AA5F69636F6E2E706E67.png",
+    "アイリ（バンド）":         "attach2/696D67_E382A2E382A4E383AAEFBC88E38390E383B3E38389EFBC895F69636F6E2E706E67.png",
+    "アオバ":                  "attach2/696D67_E382A2E382AAE383905F69636F6E2E706E67.png",
+    "アカネ":                  "attach2/696D67_E382A2E382ABE3838D5F69636F6E2E706E67.png",
+    "アカリ":                  "attach2/696D67_E382A2E382ABE383AA5F69636F6E2E706E67.png",
+    "アスナ":                  "attach2/696D67_E382A2E382B9E3838A5F69636F6E2E706E67.png",
+    "アツコ（水着）":           "attach2/696D67_E382A2E38384E382B3EFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "アヤネ":                  "attach2/696D67_E382A2E383A4E3838D5F69636F6E2E706E67.png",
+    "アヤネ（水着）":           "attach2/696D67_E382A2E383A4E3838DEFBC88E6B0B4E79D80EFBC895F69636F6E2E706E67.png",
+    "カヨコ":                  "attach2/696D67_E382ABE383A8E382B35F69636F6E2E706E67.png",
+    "御坂美琴":                "attach2/696D67_E5BEA1E59D82E7BE8EE790B45F69636F6E2E706E67.png",
+    "初音ミク":                "attach2/696D67_E5889DE99FB3E3839FE382AF5F69636F6E2E706E67.png",
+    "食蜂操祈":                "attach2/696D67_E9A39FE89C82E6938DE7A7885F69636F6E2E706E67.png",
+    "佐天涙子":                "attach2/696D67_E4BD90E5A4A9E6B699E5AD905F69636F6E2E706E67.png",
+}
+
+
+def download_icon(student_name: str, path: str, out_dir: str) -> bool:
+    url = BASE_URL + path
+    out_file = os.path.join(out_dir, f"{student_name}.png")
+    if os.path.exists(out_file) and os.path.getsize(out_file) > 1000:
+        return True  # skip if already downloaded
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        ctx = __import__("ssl").create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = __import__("ssl").CERT_NONE
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+            data = resp.read()
+        if len(data) < 500:
+            return False
+        with open(out_file, "wb") as f:
+            f.write(data)
+        return True
+    except Exception as e:
+        print(f"  ERROR: {e}", file=sys.stderr)
+        return False
+
+
+def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
+    ok = skipped = failed = 0
+    no_icon = []
+
+    for name in STUDENTS_MASTER:
+        path = WIKI_ICONS.get(name)
+        if path is None:
+            no_icon.append(name)
+            continue
+
+        out_file = os.path.join(OUT_DIR, f"{name}.png")
+        if os.path.exists(out_file) and os.path.getsize(out_file) > 1000:
+            skipped += 1
+            print(f"  SKIP  {name}")
+            continue
+
+        print(f"  DL    {name} ... ", end="", flush=True)
+        success = download_icon(name, path, OUT_DIR)
+        if success:
+            ok += 1
+            print("OK")
+        else:
+            failed += 1
+            print("FAILED")
+        time.sleep(0.3)  # サーバー負荷軽減
+
+    print(f"\n完了: OK={ok} SKIP={skipped} FAILED={failed}")
+    if no_icon:
+        print(f"アイコンなし({len(no_icon)}件): {no_icon}")
+
+
+if __name__ == "__main__":
+    main()
