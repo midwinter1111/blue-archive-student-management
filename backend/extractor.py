@@ -76,13 +76,15 @@ _DEBUG_COLORS: dict[str, tuple[int, int, int]] = {
 }
 
 # 金色（塗り星・スキルMAXバッジ）のHSV範囲
-# H:10-45(20-90°)=橙〜黄、S:100以上=彩度あり、V:120以上=明るさあり
-GOLD_STAR_LOWER = np.array([10, 100, 120])
+# H:15-45 = 橙黄〜黄（STRIKERバッジ赤橙 H=5-10 を除外）
+# S:80以上, V:100以上（JPEG圧縮後のエッジピクセルも補捉）
+GOLD_STAR_LOWER = np.array([15, 80, 100])
 GOLD_STAR_UPPER = np.array([45, 255, 255])
 
-# 固有武器の青い星 (ブルーアーカイブUIアクセントカラー: 水色〜青系)
-UNIQUE_STAR_LOWER = np.array([95,  150, 150])
-UNIQUE_STAR_UPPER = np.array([115, 255, 255])
+# 固有武器の青い星（スパークルエフェクト）のHSV範囲
+# H:90-130 = 水色〜青、S:100以上（UIパネル背景の淡青 S<100 を除外）、V:130以上
+UNIQUE_STAR_LOWER = np.array([90, 100, 130])
+UNIQUE_STAR_UPPER = np.array([130, 255, 255])
 
 # スキルMAXバッジ判定: 高彩度の金色ピクセル最低数
 SKILL_MAX_GOLD_MIN = 25
@@ -145,40 +147,18 @@ def ocr_number(roi: np.ndarray) -> int | None:
     return int(nums[0]) if nums else None
 
 
-def count_unique_stars(roi: np.ndarray) -> int:
-    """固有武器の青い★をカウントする。上限は固有4（=4個）。(BGR入力)"""
-    if roi.size == 0:
-        return 0
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, UNIQUE_STAR_LOWER, UNIQUE_STAR_UPPER)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    min_area = 12
-    count = sum(1 for i in range(1, num_labels) if stats[i, cv2.CC_STAT_AREA] >= min_area)
-    return min(count, 4)
+def _projection_peak_count(mask: np.ndarray, max_stars: int, kernel: int = 3) -> int:
+    """列方向の輝度投影によるピーク数カウント（共通ロジック）。
 
-
-def count_filled_stars(roi: np.ndarray) -> int:
-    """金色の塗り星の数をカウントする (BGR入力)
-
-    連結成分カウントではなく列方向の輝度投影によるピーク検出を使う。
-    星同士が接触・近接していても列密度の谷で分離できるため、
-    MORPH_OPEN によるブロブ合体の影響を受けない。
+    kernel: 平滑化ウィンドウ幅（ノイズ除去用。星間の谷幅より小さく設定）
+    50%閾値で隣接星間の谷（谷深さ30-40%）を確実に分離する。
+    従来の20%閾値では隣接星の谷が閾値を超えたままになり星が合体していた。
     """
-    if roi.size == 0:
-        return 0
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, GOLD_STAR_LOWER, GOLD_STAR_UPPER)
-    if not mask.any():
-        return 0
-    # 列ごとの金色ピクセル数を集計（星は横並びなのでピークが星の数に対応する）
     col_sums = mask.sum(axis=0).astype(np.float32)
-    # ボックスフィルタで平滑化（ROI幅の約1/15をカーネルサイズに）
-    k = max(3, roi.shape[1] // 15)
-    smoothed = np.convolve(col_sums, np.ones(k) / k, mode='same')
-    # 最大ピーク高さの20%を閾値として、連続した山の数を数える（山1つ＝星1個）
-    thr = smoothed.max() * 0.20
+    if col_sums.max() == 0:
+        return 0
+    smoothed = np.convolve(col_sums, np.ones(kernel) / kernel, mode='same')
+    thr = smoothed.max() * 0.50
     count = 0
     in_peak = False
     for v in smoothed:
@@ -188,7 +168,72 @@ def count_filled_stars(roi: np.ndarray) -> int:
                 in_peak = True
         else:
             in_peak = False
-    return min(count, 4)
+    return min(count, max_stars)
+
+
+def count_unique_stars(roi: np.ndarray) -> tuple[int, dict]:
+    """固有武器の青い★をカウントする。上限は固有4（=4個）。(BGR入力)
+
+    ROI右端25%（section3）は「固有武器」ボタン（常時青、定数）。
+    左75%（sections0-2）の星エリアの青ピクセル数を ROI面積 × 1.75% で割って
+    星数を推定する。セクション数ではなくピクセル量で計算する理由:
+    星は右詰め配置かつ複数星が同一セクションに収まるため。
+    戻り値: (count, debug_info)
+    """
+    debug: dict = {}
+    if roi.size == 0:
+        debug["error"] = "empty roi"
+        return 0, debug
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, UNIQUE_STAR_LOWER, UNIQUE_STAR_UPPER)
+    debug["mask_sum"] = int(mask.sum())
+    debug["roi_shape"] = list(roi.shape)
+
+    # ROIを4等分: section0=左余白, section1-2=星エリア, section3=固有武器ボタン
+    w = roi.shape[1]
+    section_w = w // 4
+    section_sums = []
+    for i in range(4):
+        x1 = i * section_w
+        x2 = x1 + section_w if i < 3 else w
+        section_sums.append(int(mask[:, x1:x2].sum()))
+    debug["section_w"] = section_w
+    debug["section_sums"] = section_sums
+
+    # section3（固有武器ボタン）を除いた星エリア(sections 0-2)の実ピクセル数
+    # mask値は0/255なので255で割る
+    star_pixels = (section_sums[0] + section_sums[1] + section_sums[2]) / 255
+
+    # 1星あたり ≈ ROI面積の1.75%（固有1実測: 205px / 11718px²）
+    # ROIが解像度に応じてスケールするため比率は解像度不変
+    per_star = 0.0175 * roi.shape[0] * roi.shape[1]
+
+    debug["star_pixels"] = round(star_pixels, 1)
+    debug["per_star"] = round(per_star, 1)
+
+    if star_pixels < per_star * 0.4:
+        debug["count"] = 0
+        return 0, debug
+
+    count = min(round(star_pixels / per_star), 4)
+    debug["count"] = count
+    return count, debug
+
+
+def count_filled_stars(roi: np.ndarray) -> int:
+    """金色の塗り星の数をカウントする (BGR入力)。上限5（固有1相当の5金星まで対応）。
+
+    50%閾値の列投影ピーク検出を使用。
+    kernel=3 の最小限平滑化で星間の谷を保持する。
+    """
+    if roi.size == 0:
+        return 0
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, GOLD_STAR_LOWER, GOLD_STAR_UPPER)
+    if mask.sum() < 30:
+        return 0
+    return _projection_peak_count(mask, 5, kernel=3)
 
 
 def detect_wb_level(roi: np.ndarray) -> int:
@@ -440,15 +485,22 @@ def extract_student_data(image: np.ndarray) -> dict[str, Any]:
         result[key] = ocr_skill_level(roi)
 
     # 固有武器/星ランク
-    # 固有レベル（青い星）を先に確認する。
-    # 青い星が検出できた場合 = 固有XX（limit_break 5〜8）。
-    # 青い星がない場合 = 黄色い星の数が limit_break（1〜4）。
-    unique_count = count_unique_stars(crop_roi(image, "unique_stars"))
+    # 青い星（固有）を先に確認。検出できれば limit_break = 4 + 固有数（5〜8）。
+    # 検出できない場合は金星の数で判定（1〜4: 通常星、5: 固有1相当の5金星表示）。
+    unique_count, unique_debug = count_unique_stars(crop_roi(image, "unique_stars"))
+    result["_debug_unique_stars"] = unique_debug
+    print("unique stars")
+    print(result["_debug_unique_stars"])
     if 1 <= unique_count <= 4:
         result["limit_break"] = 4 + unique_count
     else:
-        star_count = min(count_filled_stars(crop_roi(image, "portrait_stars")), 4)
-        result["limit_break"] = star_count if 1 <= star_count <= 4 else None
+        star_count = count_filled_stars(crop_roi(image, "portrait_stars"))
+        if star_count == 5:
+            result["limit_break"] = 5       # 5金星表示 = 固有1
+        elif 1 <= star_count <= 4:
+            result["limit_break"] = star_count
+        else:
+            result["limit_break"] = None
 
     # 装備Tier (結合OCR + O→0変換)
     for i, key in enumerate(("equip1_tier", "equip2_tier", "equip3_tier"), 1):
