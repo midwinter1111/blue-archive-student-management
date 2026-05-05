@@ -312,16 +312,18 @@ def ocr_skill_level(roi: np.ndarray) -> int | None:
     return None
 
 
-def ocr_equip_tier(roi: np.ndarray) -> int | None:
-    """装備TierをOCRで読み取る。4段階の前処理を試みる (BGR入力)。"""
+def ocr_equip_tier(roi: np.ndarray) -> tuple[int | None, list[str]]:
+    """装備TierをOCRで読み取る。複数の前処理を試みる (BGR入力)。
+    戻り値: (value, [各試行のOCR生テキスト])
+    """
     if roi.size == 0:
-        return None
+        return None, []
 
     def _parse(text: str) -> int | None:
-        # スペース除去・文字正規化してから "TX" パターンを検索
         t = text.upper().replace(" ", "")
-        # OCRの典型的な誤認識補正（特に 5↔S, 7の上横棒脱落で1になる場合）
-        for src, dst in [("I", "1"), ("L", "1"), ("O", "0"), ("S", "5"), ("B", "8"), ("Z", "2")]:
+        # 誤認識補正（7→/や\と混同しやすい等）
+        for src, dst in [("I", "1"), ("L", "1"), ("O", "0"), ("S", "5"),
+                         ("B", "8"), ("Z", "2"), ("/", "7"), ("\\", "7")]:
             t = t.replace(src, dst)
         m = re.search(r"T(\d+)", t)
         if m:
@@ -335,36 +337,66 @@ def ocr_equip_tier(roi: np.ndarray) -> int | None:
 
     reader = get_reader()
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-    # 試行1: 生カラー 4x拡大（数字の形を最も保ちやすい）
-    enlarged_color = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(_to_rgb(enlarged_color), detail=0, paragraph=False, allowlist="T0123456789"))
-    val = _parse(text)
+    import base64
+    _, buf = cv2.imencode(".png", roi)
+    roi_b64 = "data:image/png;base64," + base64.b64encode(buf).decode()
+    attempts: list[str] = [f"roi: {roi_b64}"]
+
+    def _run(img: np.ndarray, label: str, free: bool = False) -> tuple[str, int | None]:
+        rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) if img.ndim == 2 else _to_rgb(img)
+        kw: dict = dict(detail=0, paragraph=False)
+        if not free:
+            kw["allowlist"] = "T0123456789"
+        text = " ".join(reader.readtext(rgb, **kw))
+        attempts.append(f"{label}: {repr(text)}")
+        return text, _parse(text)
+
+    # 試行1: 生カラー 4x（標準）
+    _, val = _run(cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC), "1(color4x)")
     if val is not None:
-        return val
+        return val, attempts
 
-    # 試行2: OTSU二値化 + ストローク拡張（細いストロークを補完）
+    # 試行2: 白ピクセル反転マスク (S<100, V>160) 反転→8x cubic
+    # 青バッジ背景(S≈120)と紫アイコン(S≈150)が混在する ROI で OTSU が失敗する場合の代替
+    # 白テキスト(S≈10, V≈255) を抽出→反転して黒テキストon白背景にする（EasyOCRに有効）
+    white_mask = cv2.inRange(hsv, np.array([0, 0, 160]), np.array([180, 100, 255]))
+    white_mask = cv2.dilate(white_mask, np.ones((2, 2), np.uint8), iterations=1)
+    inv_mask = cv2.bitwise_not(white_mask)
+    _, val = _run(cv2.resize(inv_mask, None, fx=8, fy=8, interpolation=cv2.INTER_CUBIC), "2(inv_mask8x)")
+    if val is not None:
+        return val, attempts
+
+    # 試行3: HSV明度(V)チャネルOTSU二値化 6x
+    _, v_bin = cv2.threshold(hsv[:, :, 2], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, val = _run(cv2.resize(v_bin, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST), "3(v_otsu6x)")
+    if val is not None:
+        return val, attempts
+
+    # 試行4: グレースケールOTSU + ストローク拡張 4x
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     binary = cv2.dilate(binary, np.ones((2, 2), np.uint8), iterations=1)
-    enlarged = cv2.resize(binary, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(cv2.cvtColor(enlarged, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False, allowlist="T0123456789"))
-    val = _parse(text)
+    _, val = _run(cv2.resize(binary, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC), "4(gray_otsu4x)")
     if val is not None:
-        return val
+        return val, attempts
 
-    # 試行3: 固定閾値150で二値化（青背景の白テキストを抽出）
+    # 試行5: 固定閾値150 4x
     _, white = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-    enlarged = cv2.resize(white, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(cv2.cvtColor(enlarged, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False, allowlist="T0123456789"))
-    val = _parse(text)
+    _, val = _run(cv2.resize(white, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC), "5(thresh150_4x)")
     if val is not None:
-        return val
+        return val, attempts
 
-    # 試行4: CLAHE でコントラスト強調
+    # 試行6: allowlistなし 生カラー 6x（OCR自由読み取り→後処理で抽出）
+    _, val = _run(cv2.resize(roi, None, fx=6, fy=6, interpolation=cv2.INTER_CUBIC), "6(color6x_free)", free=True)
+    if val is not None:
+        return val, attempts
+
+    # 試行7: CLAHE コントラスト強調 4x
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
     enhanced = cv2.resize(clahe.apply(gray), None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-    text = " ".join(reader.readtext(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB), detail=0, paragraph=False, allowlist="T0123456789"))
-    return _parse(text)
+    _, val = _run(enhanced, "7(clahe4x)")
+    return val, attempts
 
 
 # OCRが形の似た漢字をカタカナと誤認識する場合の対応表
@@ -489,8 +521,7 @@ def extract_student_data(image: np.ndarray) -> dict[str, Any]:
     # 検出できない場合は金星の数で判定（1〜4: 通常星、5: 固有1相当の5金星表示）。
     unique_count, unique_debug = count_unique_stars(crop_roi(image, "unique_stars"))
     result["_debug_unique_stars"] = unique_debug
-    print("unique stars")
-    print(result["_debug_unique_stars"])
+
     if 1 <= unique_count <= 4:
         result["limit_break"] = 4 + unique_count
     else:
@@ -505,6 +536,8 @@ def extract_student_data(image: np.ndarray) -> dict[str, Any]:
     # 装備Tier (結合OCR + O→0変換)
     for i, key in enumerate(("equip1_tier", "equip2_tier", "equip3_tier"), 1):
         roi = crop_roi(image, key)
-        result[f"equip{i}"] = ocr_equip_tier(roi)
+        val, attempts = ocr_equip_tier(roi)
+        result[f"equip{i}"] = val
+        result[f"_debug_equip{i}"] = attempts
 
     return result
